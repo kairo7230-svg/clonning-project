@@ -1,166 +1,109 @@
-# 🖐️ Specific Gesture — Clone Arc Trigger System
+# Specific Gesture - Clone Arc Trigger System
 
-> Train a **custom hand gesture** using your webcam, and watch a cinematic **arc of clones** appear the moment you perform it — complete with a smoke burst effect!
+Train a custom hand gesture using your webcam, and watch an arc of clones appear the moment you perform it, complete with a smoke burst effect.
 
----
+## Overview
 
-## 📸 Overview
+`specificgesture.py` is a real-time hand-gesture recognition and visual effects system built with MediaPipe, OpenCV, and scikit-learn. It lets you:
 
-`specificgesture.py` is a real-time hand-gesture recognition + visual effects system built with **MediaPipe**, **OpenCV**, and **scikit-learn**. It lets you:
+1. Record your own custom gesture (label: clone) and a neutral hand (label: idle)
+2. Train a K-Nearest Neighbours classifier on the fly
+3. Trigger a smoke burst and arc clone formation whenever you perform your gesture live
 
-1. **Record** your own custom gesture (label: `clone`) and a neutral hand (label: `idle`)
-2. **Train** a K-Nearest Neighbours classifier on the fly
-3. **Trigger** a cinematic smoke burst → arc clone formation whenever you perform your gesture live
-
----
-
-## ⚙️ Requirements
+## Requirements
 
 ### System Requirements
-- Python **3.8 – 3.11** (MediaPipe does not yet fully support 3.12+)
-- A working **webcam**
-- Windows 10/11 (tested), macOS, or Linux
+- Python 3.8 to 3.11 (MediaPipe does not fully support 3.12+)
+- A working webcam
+- Windows 10/11, macOS, or Linux
 
-### Model Files (Download separately)
-You need two MediaPipe model files in the **same directory** as `specificgesture.py`:
+### Model Files
+
+You need two MediaPipe model files in the same directory as `specificgesture.py`:
 
 | File | Download |
 |------|----------|
-| `hand_landmarker.task` | [MediaPipe Hand Landmarker](https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task) |
-| `deeplab_v3.tflite` | [MediaPipe DeepLab v3](https://storage.googleapis.com/mediapipe-models/image_segmenter/deeplab_v3/float32/1/deeplab_v3.tflite) |
+| hand_landmarker.task | https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task |
+| deeplab_v3.tflite | https://storage.googleapis.com/mediapipe-models/image_segmenter/deeplab_v3/float32/1/deeplab_v3.tflite |
 
----
+## Installation
 
-## 📦 Installation
-
-```bash
-# 1. Clone the repository
+```
 git clone https://github.com/kairo7230-svg/specificgesture-clonning.git
 cd specificgesture-clonning
-
-# 2. (Recommended) Create a virtual environment
 python -m venv venv
-# Windows:
 venv\Scripts\activate
-# macOS/Linux:
-source venv/bin/activate
-
-# 3. Install dependencies
 pip install -r requirements.txt
-
-# 4. Download the model files (see table above) into this directory
 ```
 
----
+Download the model files into the same directory before running.
 
-## 🚀 Usage
+## Usage
 
-```bash
+```
 python specificgesture.py
 ```
 
-### Step-by-Step Workflow
+### Workflow
 
 | Step | Key | Action |
 |------|-----|--------|
-| 1 | **`1`** | **Toggle** recording your `clone` gesture — hold your gesture for ~3 sec, then press `1` again to stop |
-| 2 | **`2`** | **Toggle** recording a neutral `idle` hand — relax your hand for ~2 sec, then press `2` again to stop |
-| 3 | **`F`** | **Train** the KNN classifier on collected samples |
-| 4 | **`V`** | **Save** the trained model to `gesture_model.pkl` |
-| 5 | *(perform gesture)* | Watch the **smoke burst** and **clone arc** appear! 🎉 |
+| 1 | 1 | Toggle recording your clone gesture, hold for about 3 seconds then press 1 again to stop |
+| 2 | 2 | Toggle recording a neutral idle hand, relax your hand for about 2 seconds then press 2 again to stop |
+| 3 | F | Train the KNN classifier on collected samples |
+| 4 | V | Save the trained model to gesture_model.pkl |
+| 5 | perform gesture | The smoke burst and clone arc will appear |
 
-### All Keyboard Controls
+### Keyboard Controls
 
 | Key | Function |
 |-----|----------|
-| `1` | Toggle recording — `clone` gesture label |
-| `2` | Toggle recording — `idle` gesture label |
-| `F` | Train the classifier |
-| `V` | Save model to disk (`gesture_model.pkl`) |
-| `L` | Load model from disk |
-| `C` | Clear active clones and smoke |
-| `X` | Wipe **all** training data and the saved model (fresh start) |
-| `Q` | Quit the application |
+| 1 | Toggle recording - clone gesture label |
+| 2 | Toggle recording - idle gesture label |
+| F | Train the classifier |
+| V | Save model to disk |
+| L | Load model from disk |
+| C | Clear active clones and smoke |
+| X | Wipe all training data and the saved model |
+| Q | Quit |
 
-> **Tip:** After stopping a recording session, the system **auto-trains** if enough samples are available.
+After stopping a recording session the system will auto-train if enough samples are already available.
 
----
+## Configuration
 
-## 🎛️ Configuration
-
-Open `specificgesture.py` and tweak the `CONFIG` section at the top:
+Open `specificgesture.py` and edit the CONFIG section near the top:
 
 ```python
-TRIGGER_LABEL       = "clone"   # Gesture label that fires the arc effect
-PREDICT_CONFIDENCE  = 0.45      # Confidence threshold (lower = more sensitive)
-KNN_K               = 5         # Number of nearest neighbours
-GESTURE_HOLD_FRAMES = 3         # Consecutive frames needed before activation
-GESTURE_RESET_FRAMES= 30        # Frames without gesture before counter resets
-SMOKE_DELAY_FRAMES  = 45        # ~1.5 s smoke effect before clones appear
+TRIGGER_LABEL       = "clone"
+PREDICT_CONFIDENCE  = 0.45
+KNN_K               = 5
+GESTURE_HOLD_FRAMES = 3
+GESTURE_RESET_FRAMES= 30
+SMOKE_DELAY_FRAMES  = 45
 ```
 
----
-
-## 🧠 How It Works
-
-```
-Webcam Frame
-    │
-    ▼
-MediaPipe HandLandmarker  ──►  21 hand landmarks (x, y, z)
-    │
-    ▼
-Feature Extraction  ──►  63-d normalised vector
-  (wrist-relative + scale-normalised)
-    │
-    ▼
-KNN Classifier  ──►  label + confidence
-    │
-    ▼
-Hysteresis Gate  ──►  N consecutive frames above threshold?
-    │                   YES → Trigger!
-    ▼
-Smoke Particle System  ──►  burst at clone positions
-    │
-    ▼
-MediaPipe ImageSegmenter  ──►  person silhouette mask
-    │
-    ▼
-Arc Clone Compositor  ──►  9 clones stamped in formation
-```
-
----
-
-## 📁 Project Structure
+## Project Structure
 
 ```
 specificgesture-clonning/
-├── specificgesture.py       # Main application
-├── requirements.txt         # Python dependencies
-├── README.md                # This file
-├── hand_landmarker.task     # (download separately)
-├── deeplab_v3.tflite        # (download separately)
-└── gesture_model.pkl        # (auto-generated after training & saving)
+├── specificgesture.py
+├── requirements.txt
+├── README.md
+├── hand_landmarker.task
+├── deeplab_v3.tflite
+└── gesture_model.pkl
 ```
 
----
-
-## 🛠️ Troubleshooting
+## Troubleshooting
 
 | Problem | Solution |
 |---------|----------|
-| `FileNotFoundError: hand_landmarker.task` | Download the model files (see Requirements above) |
-| Webcam not opening | Check that no other app is using the camera; try changing `cv2.VideoCapture(0)` to `(1)` |
-| `Import error: mediapipe` | Run `pip install mediapipe==0.10.14` |
-| Gesture not triggering | Lower `PREDICT_CONFIDENCE` or record more samples; make sure you have both `clone` and `idle` labels |
-| Clones look wrong / no segmentation | Segmentation may still be warming up — wait a second after the smoke clears |
+| FileNotFoundError: hand_landmarker.task | Download the model files listed above |
+| Webcam not opening | Make sure no other app is using the camera, or try changing VideoCapture(0) to VideoCapture(1) |
+| Import error: mediapipe | Run pip install mediapipe==0.10.14 |
+| Gesture not triggering | Lower PREDICT_CONFIDENCE or record more samples, make sure you have both clone and idle labels |
+| Clones look wrong or segmentation missing | Segmentation may still be warming up, wait a moment after the smoke clears |
 
----
+## License
 
-## 📄 License
-
-MIT License — feel free to use, modify, and share.
-
----
-
-*Built with ❤️ using [MediaPipe](https://mediapipe.dev/), [OpenCV](https://opencv.org/), and [scikit-learn](https://scikit-learn.org/).*
+MIT

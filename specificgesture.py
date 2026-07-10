@@ -1,20 +1,3 @@
-"""
-specificgesture.py  -  Custom Gesture Training + Clone Arc Trigger
-===================================================================
-QUICK START:
-  1. Press 1  -> toggle recording gesture label "clone"
-     (hold your gesture for ~3 sec, press 1 again to stop)
-  2. Press 2  -> toggle recording label "idle"
-     (show neutral hand for ~2 sec, press 2 again to stop)
-  3. Press F  -> train
-  4. Press V  -> save model
-  5. Perform your "clone" gesture -> arc formation appears!
-
-Keys: 1/2 = Record toggle  F = Train  V = Save  L = Load  C = Clear  Q = Quit
-
-NOTE: matplotlib is stubbed because App Control blocks ft2font.dll.
-"""
-
 import cv2
 import numpy as np
 import time
@@ -24,52 +7,42 @@ import os
 import sys
 import types
 
-# ── matplotlib stub (must be before any mediapipe import) ───────────────────
 for _m in ["matplotlib", "matplotlib.pyplot", "matplotlib.colors",
            "matplotlib.cm", "matplotlib.patches", "matplotlib.figure"]:
     if _m not in sys.modules:
         sys.modules[_m] = types.ModuleType(_m)
-# ───────────────────────────────────────────────────────────────────────────
 
 import mediapipe as mp
 from mediapipe.tasks import python as mp_python
 from mediapipe.tasks.python import vision
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  CONFIG
-# ═══════════════════════════════════════════════════════════════════════════
 TRIGGER_LABEL       = "clone"
 MODEL_PATH          = "gesture_model.pkl"
 CAM_W, CAM_H        = 640, 480
-PREDICT_CONFIDENCE  = 0.45     # lowered – KNN vote fraction to trigger
+PREDICT_CONFIDENCE  = 0.45
 KNN_K               = 5
-GESTURE_HOLD_FRAMES = 3        # consecutive frames before activation
-GESTURE_RESET_FRAMES= 30       # frames without gesture before counter resets
+GESTURE_HOLD_FRAMES = 3
+GESTURE_RESET_FRAMES= 30
 
-# Gesture labels mapped to number keys (add more if you like)
 LABEL_KEYS = {ord('1'): "clone", ord('2'): "idle"}
 
 _PERSON_CX = 0.50
 _PERSON_FY = 0.93
 
-
-# ═══════════════════════════════════════════════════════════════════════════
-#  GLOBAL STATE
-# ═══════════════════════════════════════════════════════════════════════════
 latest_landmarks  = None
 latest_seg_mask   = None
 clone_activated   = False
 clone_configs     = []
 
-_data_lock        = threading.Lock()   # protects _train_X / _train_y
-_state_lock       = threading.Lock()   # protects hysteresis counters
+_data_lock        = threading.Lock()
+_state_lock       = threading.Lock()
 
 _recording        = False
 _current_label    = None
 _train_X          = []
 _train_y          = []
-_sample_counts    = {}     # {label: count} shown in HUD
+_sample_counts    = {}
 
 _classifier       = None
 _label_names      = []
@@ -79,27 +52,15 @@ _gesture_reset    = 0
 _last_label       = None
 _last_conf        = 0.0
 
-# Smoke / clone spawn state
-_smoke_active     = False   # True while smoke effect is playing
-_smoke_countdown  = 0       # frames remaining before clones appear
-SMOKE_DELAY_FRAMES = 45     # ~1.5 s at 30 fps
+_smoke_active     = False
+_smoke_countdown  = 0
+SMOKE_DELAY_FRAMES = 45
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  LANDMARK INDICES
-# ═══════════════════════════════════════════════════════════════════════════
 WRIST      = 0
 MIDDLE_MCP = 9
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  FEATURE EXTRACTION
-# ═══════════════════════════════════════════════════════════════════════════
 def extract_features(hand_landmarks) -> np.ndarray:
-    """
-    63-d normalised landmark vector:
-      - Wrist-relative (translation invariant)
-      - Scale-normalised by wrist-to-middle-MCP distance
-    """
     pts  = np.array([[lm.x, lm.y, lm.z] for lm in hand_landmarks], dtype=np.float32)
     pts -= pts[WRIST]
     scale = np.linalg.norm(pts[MIDDLE_MCP])
@@ -108,9 +69,6 @@ def extract_features(hand_landmarks) -> np.ndarray:
     return pts.flatten()
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  CLASSIFIER  (KNN)
-# ═══════════════════════════════════════════════════════════════════════════
 def train_classifier():
     global _classifier, _label_names
     with _data_lock:
@@ -175,7 +133,6 @@ def load_model(path):
 
 
 def predict_gesture(hand_landmarks):
-    """Returns (label, confidence) or (None, 0.0). Thread-safe read."""
     clf = _classifier
     if clf is None:
         return None, 0.0
@@ -189,7 +146,6 @@ def predict_gesture(hand_landmarks):
 
 
 def get_all_proba(hand_landmarks):
-    """Returns dict {label: confidence} for all known labels."""
     clf = _classifier
     if clf is None:
         return {}
@@ -201,30 +157,25 @@ def get_all_proba(hand_landmarks):
         return {}
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  SMOKE PARTICLE SYSTEM
-# ═══════════════════════════════════════════════════════════════════════════
 class SmokeParticle:
-    """Single smoke puff with position, radius, opacity and velocity."""
     def __init__(self, x, y):
         angle  = np.random.uniform(0, 2 * np.pi)
         speed  = np.random.uniform(0.8, 3.5)
         self.x  = float(x)
         self.y  = float(y)
         self.vx = np.cos(angle) * speed
-        self.vy = np.sin(angle) * speed - np.random.uniform(0.5, 2.0)  # drift upward
-        self.r  = np.random.randint(8, 28)       # starting radius
-        self.dr = np.random.uniform(1.2, 3.0)    # radius growth per frame
-        self.alpha = np.random.uniform(180, 255)  # starting opacity
-        self.da    = np.random.uniform(6, 14)     # fade per frame
-        # Smoke colour: dark grey → white-ish with slight blue tint
+        self.vy = np.sin(angle) * speed - np.random.uniform(0.5, 2.0)
+        self.r  = np.random.randint(8, 28)
+        self.dr = np.random.uniform(1.2, 3.0)
+        self.alpha = np.random.uniform(180, 255)
+        self.da    = np.random.uniform(6, 14)
         v = np.random.randint(60, 200)
-        self.color = (v + 20, v + 10, v)          # BGR
+        self.color = (v + 20, v + 10, v)
 
     def update(self):
         self.x    += self.vx
         self.y    += self.vy
-        self.vy   -= 0.08    # slight upward acceleration
+        self.vy   -= 0.08
         self.r    += self.dr
         self.alpha -= self.da
 
@@ -234,20 +185,16 @@ class SmokeParticle:
 
 
 class SmokeSystem:
-    """Manages all active smoke particles and renders them via alpha blending."""
     def __init__(self):
         self._particles = []
 
     def burst(self, positions, count_per_pos=18):
-        """Spawn `count_per_pos` particles at each (x, y) in positions."""
         for (x, y) in positions:
             for _ in range(count_per_pos):
                 self._particles.append(SmokeParticle(x, y))
 
     def update_and_draw(self, display):
-        """Advance physics, draw, and prune dead particles."""
         live = []
-        # Use a temporary overlay for additive blending
         overlay = display.copy()
         for p in self._particles:
             p.update()
@@ -259,7 +206,6 @@ class SmokeSystem:
                 r  = max(1, int(p.r))
                 cv2.circle(overlay, (cx, cy), r, p.color, -1)
         self._particles = live
-        # Alpha blend: smoke is semi-transparent
         cv2.addWeighted(overlay, 0.45, display, 0.55, 0, display)
 
     @property
@@ -271,25 +217,20 @@ _smoke_system = SmokeSystem()
 
 
 def _clone_spawn_positions():
-    """Return (x, y) screen positions for the smoke burst origin points."""
     W, H = CAM_W, CAM_H
-    # Arc of positions roughly matching where clones will appear
     return [
-        (int(0.22 * W), int(0.52 * H)),   # back-left
-        (int(0.78 * W), int(0.52 * H)),   # back-right
-        (int(0.10 * W), int(0.95 * H)),   # far-left
+        (int(0.22 * W), int(0.52 * H)),
+        (int(0.78 * W), int(0.52 * H)),
+        (int(0.10 * W), int(0.95 * H)),
         (int(0.24 * W), int(0.90 * H)),
         (int(0.37 * W), int(0.85 * H)),
         (int(0.63 * W), int(0.85 * H)),
         (int(0.76 * W), int(0.90 * H)),
-        (int(0.90 * W), int(0.95 * H)),   # far-right
-        (int(0.50 * W), int(0.70 * H)),   # center
+        (int(0.90 * W), int(0.95 * H)),
+        (int(0.50 * W), int(0.70 * H)),
     ]
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  ARC CLONE FORMATION
-# ═══════════════════════════════════════════════════════════════════════════
 def make_arc_configs():
     W, H   = CAM_W, CAM_H
     FEET_Y = int(H * 0.98)
@@ -334,9 +275,6 @@ def stamp_clone(display, person_bgra, px, py, scale):
     display[dy0:dy1, dx0:dx1] = (cr * a + roi * (1.0 - a)).astype(np.uint8)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  MEDIAPIPE CALLBACKS
-# ═══════════════════════════════════════════════════════════════════════════
 def receive_landmarks(result: vision.HandLandmarkerResult,
                       output_image: mp.Image, timestamp_ms: int):
     global latest_landmarks, clone_activated, clone_configs
@@ -357,14 +295,12 @@ def receive_landmarks(result: vision.HandLandmarkerResult,
 
     hand = result.hand_landmarks[0]
 
-    # ── Collect training samples ─────────────────────────────────────────
     if _recording and _current_label is not None:
         feat = extract_features(hand)
         with _data_lock:
             _train_X.append(feat)
             _train_y.append(_current_label)
 
-    # ── Predict ──────────────────────────────────────────────────────────
     label, conf = predict_gesture(hand)
     _last_label = label
     _last_conf  = conf
@@ -374,7 +310,6 @@ def receive_landmarks(result: vision.HandLandmarkerResult,
         if gesture_ok:
             _gesture_reset  = 0
             _gesture_hold  += 1
-            # Trigger smoke + delayed clone spawn
             if _gesture_hold >= GESTURE_HOLD_FRAMES and not clone_activated and not _smoke_active:
                 _smoke_active    = True
                 _smoke_countdown = SMOKE_DELAY_FRAMES
@@ -394,18 +329,14 @@ def receive_segmentation(result, output_image: mp.Image, timestamp_ms: int):
         latest_seg_mask = cv2.flip(mask, 1)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  RICH HUD
-# ═══════════════════════════════════════════════════════════════════════════
 def draw_hud(display, hand_landmarks_for_proba=None):
     dh, dw = display.shape[:2]
 
-    # ── Left panel background ─────────────────────────────────────────────
     overlay = display.copy()
     cv2.rectangle(overlay, (0, 0), (320, dh), (8, 8, 12), -1)
     cv2.addWeighted(overlay, 0.60, display, 0.40, 0, display)
 
-    y = 0  # running y cursor
+    y = 0
 
     def section(title, col=(80, 180, 255)):
         nonlocal y
@@ -423,7 +354,6 @@ def draw_hud(display, hand_landmarks_for_proba=None):
                     cv2.FONT_HERSHEY_SIMPLEX, 0.42, col, 2 if bold else 1, cv2.LINE_AA)
 
     def bar(label, value, bar_col, max_w=295):
-        """Draw a labelled progress bar."""
         nonlocal y
         y += 18
         bh = 12
@@ -436,12 +366,10 @@ def draw_hud(display, hand_landmarks_for_proba=None):
                     (12, y + bh - 2), cv2.FONT_HERSHEY_SIMPLEX,
                     0.38, (220, 220, 220), 1, cv2.LINE_AA)
 
-    # ── Controls ──────────────────────────────────────────────────────────
     section("-- CONTROLS --", (80, 180, 255))
     row("[1] Record 'clone'  [2] Record 'idle'")
     row("[F] Train  [V] Save  [L] Load  [C] Clones  [X] Clear Data  [Q] Quit")
 
-    # ── Recording status ──────────────────────────────────────────────────
     section("-- RECORDING --", (80, 180, 255))
     blink_on = int(time.time() * 2) % 2 == 0
     if _recording:
@@ -454,7 +382,6 @@ def draw_hud(display, hand_landmarks_for_proba=None):
         cv2.circle(display, (15, y + 9), 6, (50, 50, 60), -1)
         row("  Idle - press 1 or 2 to record", (120, 120, 130))
 
-    # Sample counts per label
     with _data_lock:
         y_arr = list(_train_y)
     labels_seen = sorted(set(y_arr)) if y_arr else []
@@ -465,14 +392,12 @@ def draw_hud(display, hand_landmarks_for_proba=None):
     if not labels_seen:
         row("  No samples yet", (80, 80, 90))
 
-    # ── Model status ──────────────────────────────────────────────────────
     section("-- MODEL --", (80, 180, 255))
     if _classifier is not None:
         row(f"  READY  labels={_label_names}", (0, 220, 100), bold=True)
     else:
         row("  No model - press F to train", (100, 100, 110))
 
-    # ── Live prediction ───────────────────────────────────────────────────
     section("-- LIVE PREDICTION --", (80, 180, 255))
 
     if hand_landmarks_for_proba is not None and _classifier is not None:
@@ -483,7 +408,6 @@ def draw_hud(display, hand_landmarks_for_proba=None):
             b_col = (0, 200, 80) if is_trigger else (60, 120, 200)
             bar(lbl, conf, b_col)
         y += 4
-        # Show verdict
         top_lbl = max(all_p, key=all_p.get) if all_p else None
         top_conf = all_p.get(top_lbl, 0) if top_lbl else 0
         is_trig = (top_lbl == TRIGGER_LABEL and top_conf >= PREDICT_CONFIDENCE)
@@ -498,7 +422,6 @@ def draw_hud(display, hand_landmarks_for_proba=None):
     else:
         row("  No hand detected", (80, 80, 90))
 
-    # ── Hysteresis progress bar ───────────────────────────────────────────
     section("-- HOLD PROGRESS --", (80, 180, 255))
     with _state_lock:
         hold = _gesture_hold
@@ -506,7 +429,6 @@ def draw_hud(display, hand_landmarks_for_proba=None):
     p_col = (0, 220, 80) if progress >= 1.0 else (60, 160, 255)
     bar(f"Gesture hold ({hold}/{GESTURE_HOLD_FRAMES})", progress, p_col)
 
-    # ── Clone status ──────────────────────────────────────────────────────
     section("-- CLONE STATUS --", (80, 180, 255))
     if clone_activated:
         n = len(clone_configs)
@@ -517,20 +439,15 @@ def draw_hud(display, hand_landmarks_for_proba=None):
     else:
         row("  No clones - perform trigger gesture", (80, 80, 90))
 
-    # ── Trigger label reminder ────────────────────────────────────────────
     y = dh - 20
     cv2.putText(display, f"Trigger='{TRIGGER_LABEL}'  threshold={PREDICT_CONFIDENCE:.0%}  hold={GESTURE_HOLD_FRAMES}f",
                 (8, y), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (100, 100, 130), 1, cv2.LINE_AA)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  MAIN
-# ═══════════════════════════════════════════════════════════════════════════
 def main():
     global _recording, _current_label, clone_activated, clone_configs
     global _smoke_active, _smoke_countdown
 
-    # Auto-load saved model
     if os.path.exists(MODEL_PATH):
         load_model(MODEL_PATH)
 
@@ -579,19 +496,15 @@ def main():
 
             display = cv2.flip(frame, 1)
 
-            # ── Smoke effect (pre-clone) ──────────────────────────────────
             if _smoke_active:
                 if _smoke_countdown == SMOKE_DELAY_FRAMES:
-                    # First frame of smoke: fire a big burst at all positions
                     _smoke_system.burst(_clone_spawn_positions(), count_per_pos=22)
                 elif _smoke_countdown == SMOKE_DELAY_FRAMES // 2:
-                    # Mid-way: second smaller burst for density
                     _smoke_system.burst(_clone_spawn_positions(), count_per_pos=10)
 
                 _smoke_system.update_and_draw(display)
                 _smoke_countdown -= 1
 
-                # Flash text while smoke is building
                 blink = int(time.time() * 4) % 2 == 0
                 if blink:
                     cv2.putText(display, "CLONING...",
@@ -600,17 +513,14 @@ def main():
                                 (180, 230, 255), 3, cv2.LINE_AA)
 
                 if _smoke_countdown <= 0:
-                    # Smoke done -> spawn clones
                     clone_configs   = make_arc_configs()
                     clone_activated = True
                     _smoke_active   = False
                     print(f"[CLONE] Arc formation spawned: {len(clone_configs)} clones.")
 
-            # ── Clone compositing ─────────────────────────────────────────
             if clone_activated and clone_configs:
                 dh, dw = display.shape[:2]
                 if latest_seg_mask is not None:
-                    # Full segmented clone
                     seg = latest_seg_mask
                     if seg.shape[:2] != (dh, dw):
                         seg = cv2.resize(seg, (dw, dh))
@@ -622,7 +532,6 @@ def main():
                     pbgra          = cv2.cvtColor(display, cv2.COLOR_BGR2BGRA)
                     pbgra[:, :, 3] = sm
                 else:
-                    # Segmentation not ready yet: use full frame as clone
                     pbgra = cv2.cvtColor(display, cv2.COLOR_BGR2BGRA)
 
                 for (px, py, scale) in clone_configs:
@@ -633,7 +542,6 @@ def main():
                             (330, 40), cv2.FONT_HERSHEY_SIMPLEX,
                             1.0, (0, 255, 140), 2, cv2.LINE_AA)
 
-            # ── Hand landmark dots ─────────────────────────────────────────
             hand_for_hud = None
             if latest_landmarks and latest_landmarks.hand_landmarks:
                 fh, fw = display.shape[:2]
@@ -644,12 +552,10 @@ def main():
                         cv2.circle(display, (cx, cy), 4, (0, 220, 255), -1)
                 hand_for_hud = latest_landmarks.hand_landmarks[0]
 
-            # ── HUD ───────────────────────────────────────────────────────
             draw_hud(display, hand_landmarks_for_proba=hand_for_hud)
 
             cv2.imshow("Gesture Trainer | Clone System", display)
 
-            # ── Key handling (no input() blocking!) ───────────────────────
             key = cv2.waitKey(1) & 0xFF
 
             if key == ord('q'):
@@ -658,7 +564,6 @@ def main():
             elif key in LABEL_KEYS:
                 label = LABEL_KEYS[key]
                 if _recording and _current_label == label:
-                    # Stop recording this label
                     _recording     = False
                     _current_label = None
                     with _data_lock:
@@ -666,14 +571,12 @@ def main():
                         total      = len(_train_X)
                         counts_str = {lbl: _train_y.count(lbl) for lbl in set(_train_y)}
                     print(f"[REC] Stopped '{label}'. Samples per label: {counts_str}  (total={total})")
-                    # Auto-train if we have enough samples (lock-safe check)
                     if total >= KNN_K:
                         print("[TRAIN] Auto-training...")
                         train_classifier()
                     else:
                         print(f"[TRAIN] Not enough samples yet ({total}/{KNN_K}). Record more data.")
                 else:
-                    # Start recording this label
                     _recording     = True
                     _current_label = label
                     print(f"[REC] Recording '{label}' ... press {chr(key)} again to stop.")
@@ -702,7 +605,6 @@ def main():
                 print("[CLEAR] Clones and smoke cleared.")
 
             elif key == ord('x'):
-                # ── Wipe ALL training data and model (fresh start) ─────────
                 _recording = False
                 _current_label = None
                 with _data_lock:
@@ -712,7 +614,6 @@ def main():
                 global _classifier, _label_names
                 _classifier  = None
                 _label_names = []
-                # Also delete saved model file if present
                 if os.path.exists(MODEL_PATH):
                     os.remove(MODEL_PATH)
                     print("[X] Deleted saved model file.")

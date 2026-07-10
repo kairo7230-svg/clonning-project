@@ -1,9 +1,4 @@
-# Core vision & hand tracking
 opencv-python>=4.8.0
 mediapipe==0.10.14
-
-# Machine learning classifier
 scikit-learn>=1.3.0
-
-# Numerical computing (mediapipe & sklearn both depend on this)
 numpy>=1.24.0
